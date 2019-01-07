@@ -1,0 +1,364 @@
+---
+title: "Práctica 2: Limpieza y validación de los datos"
+subtitle: "Tipología y ciclo de vida de los datos"
+author: "Jose María Bernet Fernández"
+date: '`r format(Sys.Date(),"%e de %B, %Y")`'
+output:
+  pdf_document:
+    toc: yes
+    number_sections: yes
+  html_document:
+    toc: yes
+    number_sections: yes
+    toc_depth: 2
+    toc_float: true 
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, comment = "", warning = FALSE, message = FALSE, tidy.opts=list(width.cutoff=80),tidy=TRUE , size="small")
+options( scipen = 20 )
+
+```
+
+
+```{r load_libraries, include=FALSE}
+library(knitr)
+library(psych)
+library(VIM)
+library(kableExtra)
+library(corrplot)
+library(caret)
+library(purrr)
+library(tidyr)
+library(ggplot2)
+
+```
+
+\newpage
+
+***
+# Descripción del dataset
+***
+
+El dataset ha sido elegido desde la plataforma Kaggle ([enlace](https://www.kaggle.com/uciml/red-wine-quality-cortez-et-al-2009)) corresponde a una colección de 1599 (registros) vinos portugueses donde se describen 12 (columnas) caracteristicas distribuidos en fisicoquímicas (entradas) y sensorial (salida). Las columnas del dataset son las siguientes:
+
+* __fixed.acidity__ : Nivel de acidez del vino.
+
+* __volatile.acidity__ : Nivel de acido acético, mucha cantidad de este ácido provoca un sabor amargo.
+
+* __critic.acid__ : Nivel de cítricos.
+
+* __residual.sugar__ : Cantidad de azucar que queda en el vino una vez termina la fermentación.
+
+* __chlorides__ : Cantidad de sal que contiene el vino.
+
+* __free.sulfur.dioxide__ : Cantidad de dióxido de azufre, previene el crecimiento microbiano y la oxidación del vino.
+
+* __total.sulfur.dioxide__ : Nivel de acidez del vino.
+
+* __density__ : Densidad.
+
+* __ph__ : Nivel de PH.
+
+* __sulphates__ : Nivel de sulfatos.
+
+* __alcohol__ : Porcentaje de alcohol.
+
+* __quality__ : Calidad del vino, basado en datos sensoriales.
+
+
+Gracias a este dataset, podemos deducir que tipo de vino podría tener mejor calidad que otro, tomando cómo muestra los datos fisicoquimicos de un vino cualquiera que analizemos y en base a los datos sensoriales de calidad que tenemos. 
+
+De este modo, con la información disponible podemos poner a disposición de las diferentes empresas que elaboran vino las cantidades y porcentajes exactos en la elaboración para intentar conseguir unos valores de calidad superiores, en función de los analisis que tenemos.
+
+***
+# Integración y selección de los datos de interés a analizar
+***
+
+El dataset se encuentra en formato CSV, este fichero lo cargaremos y volcaremos sobre un dataframe, en principio las 12 columnas que disponemos van a ser utilizadas ya que no existen columnas de identificación ni valores que sobren, más adelante veremos si podemos prescindir de alguna de las columnas por que no sea lo suficientemente relevante.
+
+\vspace{12pt}
+```{r }
+
+# Cargamos el csv a un dataframe que denominaremos wine
+
+wine <- read.csv(file="winequality-red.csv", header=TRUE, sep=",",
+                      strip.white=TRUE)
+
+```
+
+
+***
+# Limpieza de los datos
+***
+
+## ¿Los datos contienen ceros o elementos vacíos? ¿Cómo gestionarías cada uno de estos casos?
+
+Antes de comprobar si existen valores NA, haremos un summary para ver los tipos de datos que disponemos y ver si existe algun valor extraño, en principio, los valores son todos númericos y estan acotados entre dos intervalos por los que no deberíamos de efectuar ninguna operación.
+
+\vspace{12pt}
+```{r fig.align='center'}
+
+# Hacemos el summary de los datos
+
+kable(summary(wine)) %>% kable_styling(latex_options="scale_down")
+
+# Consultamos el tipo de variable
+
+kable(sapply(wine, function(x) class(x)))
+
+# Miramos los valores mínimos y máximos de cada variable
+
+kable(t(sapply(wine, function(x){ c(min(x),max(x))})))
+
+
+```
+
+Podemos comprobar que todas las variables son de tipo numerico menos la calidad que es un entero, además los valores mínimos y máximos no nos hacen sospechar de que hubiese datos corruptos. Comprobamos ahora si existiese algún valor NA, además miraremos si existiese algún cero, en el resumen de máximos y mínimos ya vimos que solo podía haber una columna con ceros que es el citric.acid pero esto es normal, ya que el vino puede tener un contenido cítrico o no, depende del tipo de vino.
+
+\vspace{12pt}
+```{r fig.align='center'}
+
+# Comprobamos valores vacios
+kable(sapply(wine, function(x) sum(is.na(x))))
+
+```
+
+Podemos ver que tamopco tenemos ningún valor NA. En el caso de haber algún valor vació o algún cero en una columna donde no debiese de estar, tendremos primero que ver la importancía de la columna en sí para el resultado final, si es una columna relevante lo mejor será eliminar la muestra para no falsear los datos, esto es posible por que tenemos un dataset bastante grande (1599) en un conjunto más pequeño sería una perdida importante, si por el contrario la columna no es relevante para nuestro estudio podríamos dejar el registro, todo depende del grado de error que estemos dispuesto a asumir.
+
+## Identificación y tratamiento de valores extremos.
+
+El único dato que se sale un poco de la normalidad es el total.sulfur.dioxide,de todos modos comprobaremos ahora mediante boxplot si los datos contienen valores extremos (outliers). Haremos uso de la función boxplot.stats dentro de sapply para ver de un vistazo todos los valores que se consideran extremos en primera instancia.
+
+
+\vspace{12pt}
+```{r }
+# Ejecutamos el boxplot.stats para todas las columnas
+sapply(wine, function(x) boxplot.stats(x)$out)
+```
+
+Descubrimos que hay muchisimos valores considerados extremos, pero esto no quiere decir que todos los valores sean erroneos, sino que la mayoría de muestras del dataset se comprenden en un rango definido de valores y hay otras tantas que se salen de la media, no por ello son errores, miramos por ejemplo un par de boxplots que tengan bastantes balores extremos y hacemos también summary para comprobar los cuantiles.
+
+\vspace{12pt}
+```{r out.width=c('50%', '50%'), fig.show='hold'}
+
+# Dibujamos boxplot
+boxplot(wine$chlorides)
+boxplot(wine$residual.sugar)
+boxplot(wine$quality)
+
+```
+
+\vspace{12pt}
+```{r}
+
+# Mostramos summary
+summary(wine$chlorides)
+summary(wine$residual.sugar)
+summary(wine$quality)
+```
+
+Podemos ver mirando los cúantiles y las gráficas cómo la mayoría de muestras se engloban en pequeñas cantidades, por ejemplo, el primer cuantíl y el tercero de los chlorides son 0.07 y 0.09 respectivamente, sin embargo su valor máximo son 0.611. Dado que no tenemos los conocmientos químicos para asegurar que los datos extremos son erroneos, debemos de suponer que existen tipos de vinos que tienen caracteristicas diferentes a los otros, por lo que en este caso nos quedaremos con los datos tal y como estan.
+
+
+***
+# Análisis de los datos
+***
+
+
+## Selección de los grupos de datos que se quieren analizar/comparar (planificación de los análisis a aplicar).
+
+Para entender un poco más los datos que queremos usar en nuestro analisis vamos a mostrar una seríe de gráficas para ver cómo se distribuyen algunos datos.
+
+\vspace{12pt}
+```{r}
+
+hist(wine$quality,col='gray',border='gray',main='Distr. calidad',xlab='Calidad')
+
+```
+
+Lo primero que vemos es el histográma de la calidad, con este gráfico podemos ver la distribución de las diferentes calificaciones que han obtenido los vinos, si nos fijamos, practicamente la mitad se puede encontrar entre el 5 y el 6 (si consultamos el summary que hicimos anteriormente vemos cómo la media es 5.636), por lo que para realizar nuestros análisis podemos decir que un vino con puntuación menor  o igual que 6 es considerado de menor calidad y un vino con puntuación superior o igual a 6 será considerado de una calidad mejor.
+
+Con la idea de usarlo posteriormente en un modelo de regresión logística, prepararemos una nueva columna del dataframe con 0 y 1, indicando si el vino es de peor, o mejor calidad, usaremos como punto nota de refencia el 6.
+ 
+\vspace{12pt}
+```{r}
+
+wine$log_quality <- ifelse(wine$quality <=6 ,0, 1)
+
+```
+
+
+\vspace{12pt}
+```{r}
+
+# Vemos el histograma de todas las columnas
+wine %>%
+  keep(is.numeric) %>% 
+  gather() %>% 
+  ggplot(aes(value)) +
+    facet_wrap(~ key, scales = "free") +
+    geom_histogram()
+```
+
+Al mostrar el histograma de todas las columnas se pueden preveer que algunas tienen muchas posibilidades de seguir una distribución normal.
+
+## Comprobación de la normalidad y homogeneidad de la varianza
+
+Para comprobar si nuestros atributos del dataset siguen una distribución normal haremos uso del test de Shapiro-Wilks. Existen diversas gráficas que sirven también para comprobarlo pero aunque parezcan datos seguros, siguen dejando lugar a la interpretación, con el test de Shapiro-Wilks simplemente miraremos nos devuelva un p-valor mayor o igual que 0.5 para poder decir que sigue una distribución normal.
+
+\vspace{12pt}
+```{r}
+
+# Usamos Sapply para realizar el test de saphiro en todas las columnas del dataset.
+sapply(wine, function(x){ (shapiro.test(x))$p.value})
+
+```
+
+Podemos ver cómo todos los atributos tienen un p-valor muy inferior al 0.5, por lo que consideramos que se alejan bastante de una distribción normal. Podemos ver ahora cómo se podría hacer esta comprobación de manera gráfica con algunos atributos por ejemplo chlorides y pH, que son los que tienen el p-valor más distante, para ver las diferencias.
+
+\vspace{12pt}
+```{r ,eval=TRUE,echo=TRUE}
+par(mfrow=c(2,2))
+
+qqnorm(wine$chlorides)
+qqline(wine$chlorides, col = "red")
+
+qqnorm(wine$pH)
+qqline(wine$pH, col = "red")
+
+```
+
+Podemos ver cómo el pH, al ser el que tiene un p-valor más grande, muestra un parecido mayor a la normal (los puntos se aproximan más a la linea roja) sin embargo en la otra gráfica, la de chlorides, vemos cómo se aleja enormemente de la linea roja.
+
+Para comprobar ahora la homogeneidad de la varianza tenemos varías funciones disponibles, haremos uso del test de Fligner-Killeen que es el más recomendado cuando no tenemos datos con distribución normal, para realizar el test necesitaremos comparar dos conjuntos de datos, enfrentaremos por tanto aquellos registros que 
+
+\vspace{12pt}
+```{r ,eval=TRUE,echo=TRUE}
+
+fligner.test(pH ~ log_quality, data = wine)
+
+```
+
+## Aplicación de pruebas estadísticas para comparar los grupos de datos. En función de los datos y el objetivo del estudio, aplicar pruebas de contraste de hipótesis, correlaciones, regresiones, etc.
+
+
+### Correlación
+
+Cómo nuestro objetivo del estudio se basa principalmente en identificar qúe componentes fisicoquimicos afectán más directamente a la calidad del vino empezaremos el análisis mostrando una matriz de correlación de las variables respecto la calidad.
+
+
+\vspace{12pt}
+```{r ,eval=TRUE,echo=TRUE}
+
+wine_1 <- wine[c('quality','fixed.acidity','volatile.acidity','citric.acid',
+                 'residual.sugar','chlorides','free.sulfur.dioxide',
+                 'total.sulfur.dioxide','density','pH','sulphates','alcohol')]
+
+o=corrplot(cor(wine_1), method='circle', type='upper')
+
+```
+
+Vemos como el corrplot nos muestran en la primera fila los grados de correlación entre las distintas variables y la calidad del vino, el tamaño del circulo indica el nivel de significación y el color si es una relación inversa o directa, es decir, si a mayor cantidad de un componente la calidad subira o bajará. Aunque no haya ninguna correlación extremadamente fuerte, podemos ver cómo hay 4 elementos que tienen un circulo mayor, estos son alcohol, sulphates, citric,acid y volatile.acidity.
+
+### Contraste de Hipótesis
+
+Continuando con los analisis estadisticos, pasamos ahora a el contraste de hipotesis, queremos saber si las bebidas que tienen más concentración de alcohol son propensas a tener una mayor calidad, tal y como se ha podido preveer viendo la matriz de correlación, suponemos entonces que:
+
+\(H_0: \mu_{1} - \mu_{2} > 0\)
+\(H_1: \mu_{1} - \mu_{2} =< 0\)
+
+\vspace{12pt}
+```{r ,eval=TRUE,echo=TRUE}
+
+wine.better.alcohol <- wine[wine$quality >= 6,]$alcohol
+wine.worse.alcohol <-wine[wine$quality < 6,]$alcohol
+
+```
+
+De este modo tenemos que \(\mu_{1}\) corresponde a la media de alcohol de bebidas con una calidad inferior y \(\mu_{2}\) corresponde a la media de alcohol de bebidas con una calidad superior, tomamos  \(\alpha\) = 0.05.
+
+\vspace{12pt}
+```{r ,eval=TRUE,echo=TRUE}
+
+t.test(wine.worse.alcohol, wine.better.alcohol , alternative = "less")
+
+
+```
+
+El p-valor resultado es 0.00000000000000022 muy inferior al valor de significaciín 0.05, por lo que tenemos que rechazar la hipotesis nula a favor de la hipotesis alternativa, concluyendo que las bebidas con una mayor concentración de alcohol son bebidas de mayor calidad.
+
+### Regresión
+
+Con el fin de predecir la calidad del vino vamos a realizar una serie de modelos de regresión lineal probando los diferentes atributos que más afectaban a la calidad, como vimos en la matriz de correlación, usaremos por tanto: alcohol, sulphates, citric.acid y volatile.acidity.
+
+
+\vspace{12pt}
+```{r ,eval=TRUE,echo=TRUE}
+
+modelo_1 <- lm(quality ~  alcohol + sulphates + citric.acid + volatile.acidity, data = wine)
+summary(modelo_1)
+plot(modelo_1, col='blue')
+
+```
+
+Haciendo summary del modelo podemos ver que la calidad R2 del ajuste es 0.3361, un valor bastante distante del 1, por lo que la calidad del modelo no es muy buena, nos fijamos ahora en los P-valores de las diferentes variables y descubrimos que todas excepto citric.acid tienen una influencia significativa con un p-valor inferior a un ajuste de 0.05, realizamos el modelo sacando la variable citric.acid.
+
+
+\vspace{12pt}
+```{r ,eval=TRUE,echo=TRUE}
+
+modelo_2 <- lm(quality ~  alcohol + sulphates + volatile.acidity, data = wine)
+summary(modelo_2)
+plot(modelo_2, col='blue')
+
+
+```
+
+Cómo vemos ninguno de los modelos tiene una buena calidad del ajuste, vamos a probar ahora un modelo de regresión logistica para adivinar si el vino es de calidad o no, basado en nuestro indicador log_quality creado anteriormente.
+
+
+\vspace{12pt}
+```{r ,eval=TRUE,echo=TRUE}
+
+modelo_3 <- glm(log_quality ~  alcohol + sulphates + citric.acid + volatile.acidity,data=wine,family=binomial())
+summary(modelo_3)
+
+modelo_4 <- glm(log_quality ~  alcohol + sulphates  + volatile.acidity,data=wine,family=binomial())
+summary(modelo_4)
+
+plot(modelo_4, col='blue')
+
+```
+
+Vemos ahora la matriz de confusión para analizar la calidad del modelo, usamos nuestro propio dataset como parametros de referencia mediante la columna log_quality y predecimos usando el modelo_4 que nos ha dado un AIC superior, aunque apenas hay diferencia. Usaremos cómo umbral discriminatorio un 70%, es decir sólo cuando haya más de un 0.7 en la predicción, tomaremos el valor cómo bueno.
+
+
+\vspace{12pt}
+```{r ,eval=TRUE,echo=TRUE}
+
+wine$qualityPredictedRaw <- predict(modelo_4, newdata=wine,type="response")
+wine$qualityPredicted <- as.factor(ifelse(predict(modelo_4, newdata=wine) > 0.7, 1, 0))
+wine$log_quality <- as.factor(wine$log_quality)
+
+
+confusionMatrix(wine$qualityPredicted,wine$log_quality)
+```
+
+Podemos ver que tenemos 11 falsos positivos y 192 falsos negativos y una perfección del 87.3%.
+
+# Conclusiones
+
+Después de realizar el estudio, para el cúal se han desarrollado diversos modelos de regresión logistica, regresión lineal y matriz de correlaciones, hemos podido identificar que existen caracteristicas fisicoquímicas que hacen aumentar la calidad del vino, estos son el alcohol, los sulfatos, el ácido cítrico y la acidez volátil.
+
+El mejor modelo de regresión que hemos encontrado nos ha dado unas predicciones con un acierto del 87,3% lo cual, aún siendo un buen resultado, estariamos hablando de asumir un error del 12,7%.
+
+El problema principal al que nos hemos enfrentado es la poca variedad que hay en la columna de calidad, donde la mayoria de registros se encontraban en los valores 5 y 6, si hubiesemos tenido una distribución más regular podríamos a ver conseguido mejores resultados.
+
+En definitiva, aunque no hayamos dado con un mejor modelo ni hayamos encontrado la receta del vino perfecto, hemos encontrado las caracteristicas que a grosso modo, hacen que el vino sea mejor.
+
+
+```{r ,eval=TRUE,echo=TRUE}
+write.csv(wine, file = "winequality-red-out.csv")
+```
